@@ -14,7 +14,7 @@ parser.add_argument('device', type=str, help='path to device file')
 parser.add_argument('outfile', type=str, help='output file path')
 parser.add_argument('-s', '--start-time', dest='starttime', type=str, help='start time (\"YYYY-MM-DD HH:MM:SS\")')
 
-args = parser.parse_args()
+args = parser.parse_args(['/dev/ttyUSB0', 'output.txt', '-s', '2014-01-02'])
 
 device = args.device
 outfile = args.outfile
@@ -24,12 +24,15 @@ ser = serial.Serial()
 ###################
 ##### Helpers #####
 ###################
-# Pack little endian
-def _ple(i):
-    return struct.pack("<I", i)
 
-def _get_real_values((val1,val2)):
-    
+
+# Pack little endian
+def _ple(value):
+    return struct.pack("<I", value)
+
+
+def _get_real_values(val1, val2):
+
     oval1 = ord(val1)
     oval2 = ord(val2)
     v1 = oval1 - 0x80
@@ -38,16 +41,17 @@ def _get_real_values((val1,val2)):
         v1 = 127
     if v2 == 0 or oval2 == 0xFF:
         v2 = 255
-    return (v1,v2)
+    return (v1, v2)
+
 
 def _parse_list(toparse, parsed):
     while toparse:
         if len(toparse) > 1:
-            fs = (toparse.pop(0),toparse.pop(0))
-            if not fs == ('\x0f','\x80'):
-                (f,s) = _get_real_values(fs)
-                if f >= 0 and s >= 0:
-                    parsed.append(f)
+            fs = (toparse.pop(0), toparse.pop(0))
+            if not fs == ('\x0f', '\x80'):
+                (file, s) = _get_real_values(fs)
+                if file >= 0 and s >= 0:
+                    parsed.append(file)
                     parsed.append(s)
         else:
             toparse.pop(0)
@@ -55,14 +59,17 @@ def _parse_list(toparse, parsed):
 #####################
 ##### Functions #####
 #####################
+
+
 def configure_serial(ser):
-    ser.baudrate = 115200               # 115200
-    ser.bytesize = serial.EIGHTBITS     # 8
-    ser.parity = serial.PARITY_NONE     # N
+    ser.baudrate = 115200  # 115200
+    ser.bytesize = serial.EIGHTBITS  # 8
+    ser.parity = serial.PARITY_NONE  # N
     ser.stopbits = serial.STOPBITS_ONE  # 1
-    ser.xonxoff = 1                     # XON/XOFF flow control
+    ser.xonxoff = 1  # XON/XOFF flow control
     ser.timeout = 1
     ser.port = device
+
 
 def get_raw_data(ser):
     sys.stdout.write("Connecting to device...")
@@ -79,36 +86,40 @@ def get_raw_data(ser):
     print("done!")
     return raw
 
+
 def parse_raw_data(data):
-    sys.stdout.write("Parsing data...", )
+    sys.stdout.write("Parsing data...",)
     sys.stdout.flush()
     parsed = []
     _parse_list(data, parsed)
     print("done!")
     return parsed
 
-def get_len_of_parsed_data(parsed):
-    return len(parsed) / 2 # 1Hz, two values (pulse and sats)
 
-def write_to_file(parsed, total_len, f):
-    sys.stdout.write("Writing to file...", )
+def get_len_of_parsed_data(parsed):
+    return len(parsed) / 2  # 1Hz, two values (pulse and sats)
+
+
+def write_to_file(parsed, total_len, file):
+    sys.stdout.write("Writing to file...",)
     sys.stdout.flush()
 
     zeroval = _ple(0)
-    f.write(_ple(856))
-    f.write(_ple(1))
+    file.write(_ple(856))
+    file.write(_ple(1))
     for _ in range(212):
-        f.write(zeroval)
-    f.write(_ple(1))
+        file.write(zeroval)
+    file.write(_ple(1))
     for _ in range(55):
-        f.write(zeroval)
-    f.write(_ple(total_len))
+        file.write(zeroval)
+    file.write(_ple(total_len))
     for e in parsed:
-        f.write(chr(e))
+        file.write(chr(e))
 
-def change_starttime(f):
+
+def change_starttime(file):
     if starttime != None:
-        sys.stdout.write("changing start time...", )
+        sys.stdout.write("changing start time...",)
         sys.stdout.flush()
         dt = parse(starttime, dayfirst=False, yearfirst=True)
         year = _ple(dt.year)
@@ -117,20 +128,29 @@ def change_starttime(f):
         hour = _ple(dt.hour)
         minute = _ple(dt.minute)
         second = _ple(dt.second)
-        f.seek(0x420)
+        file.seek(0x420)
         s = year + month + day + hour + minute + second
-        f.write(s)
-
+        file.write(s)
 
 ################
 ##### Main #####
 ################
+
+
 configure_serial(ser)
+
 data = get_raw_data(ser)
+
 parsed = parse_raw_data(data)
+
 total_len = get_len_of_parsed_data(parsed)
-f = open(outfile, 'wb')
-write_to_file(parsed, total_len, f)
-change_starttime(f)
-f.close()
+
+file = open(outfile, 'wb')
+
+write_to_file(parsed, total_len, file)
+
+change_starttime(file)
+
+file.close()
+
 print("done!")
